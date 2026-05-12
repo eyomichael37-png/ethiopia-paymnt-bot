@@ -158,20 +158,22 @@ ${JSON.stringify(payment.accountDetails, null, 2)}
       
     case 'stats':
       const allPaymentsStats = db.getAllPayments(1000);
-      const approved = allPaymentsStats.filter(p => p.status === 'approved');
-      const pending = allPaymentsStats.filter(p => p.status === 'waiting_verification');
-      const rejected = allPaymentsStats.filter(p => p.status === 'rejected');
-      const totalAmount = approved.reduce((sum, p) => sum + parseFloat(p.amount), 0);
+      
+      // FIXED: Use different variable names to avoid duplication
+      const totalApproved = allPaymentsStats.filter(p => p.status === 'approved');
+      const totalPending = allPaymentsStats.filter(p => p.status === 'waiting_verification');
+      const totalRejected = allPaymentsStats.filter(p => p.status === 'rejected');
+      const totalAmountReceived = totalApproved.reduce((sum, p) => sum + parseFloat(p.amount), 0);
       
       const statsMsg = `
 📈 *Bot Statistics*
 
 *Total Payments:* ${allPaymentsStats.length}
-*Approved:* ${approved.length}
-*Pending Verification:* ${pending.length}
-*Rejected:* ${rejected.length}
+*Approved:* ${totalApproved.length}
+*Pending Verification:* ${totalPending.length}
+*Rejected:* ${totalRejected.length}
 
-*Total Revenue:* ${totalAmount.toLocaleString()} ETB
+*Total Revenue:* ${totalAmountReceived.toLocaleString()} ETB
       `;
       bot.sendMessage(chatId, statsMsg, { parse_mode: 'Markdown' });
       break;
