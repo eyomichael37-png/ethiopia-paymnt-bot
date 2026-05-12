@@ -1,0 +1,18 @@
+{
+  "name": "ethiopia-manual-payment-bot",
+  "version": "1.0.0",
+  "description": "Telegram bot for manual payment verification with Ethiopian banks and mobile money",
+  "main": "src/bot.js",
+  "scripts": {
+    "start": "node src/bot.js",
+    "dev": "nodemon src/bot.js"
+  },
+  "dependencies": {
+    "node-telegram-bot-api": "^0.64.0",
+    "express": "^4.18.2",
+    "dotenv": "^16.3.1"
+  },
+  "devDependencies": {
+    "nodemon": "^3.0.1"
+  }
+}

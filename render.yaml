@@ -1,0 +1,15 @@
+services:
+  - type: web
+    name: ethiopia-payment-bot
+    env: node
+    buildCommand: npm install
+    startCommand: npm start
+    envVars:
+      - key: TELEGRAM_BOT_TOKEN
+        sync: false
+      - key: ADMIN_USER_ID
+        sync: false
+      - key: PORT
+        value: 3000
+    autoDeploy: true
+    healthCheckPath: /health
