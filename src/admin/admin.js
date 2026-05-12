@@ -1,5 +1,9 @@
 async function handleAdminCommand(bot, command, args, chatId, db) {
-  switch (command) {
+  switch (command) 
+   { // Add after the switch statement opening
+      case 'cancel':
+    bot.sendMessage(chatId, '✅ Operation cancelled.');
+    break;
     case 'approve':
       if (!args) {
         bot.sendMessage(chatId, '❌ Usage: /approve <payment_id> [notes]');
