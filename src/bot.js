@@ -35,11 +35,10 @@ const botCommands = [
     { command: 'cancel', description: '❌ Cancel current operation' }
 ];
 
-// Set commands menu (async, don't await - it's not critical)
+// Set commands menu
 bot.setMyCommands(botCommands).catch(err => console.error('Error setting commands:', err.message));
 
 // ============= WEBHOOK ENDPOINT =============
-// This is where Telegram will send updates
 app.post(`/webhook/${token}`, (req, res) => {
     try {
         bot.processUpdate(req.body);
@@ -50,7 +49,7 @@ app.post(`/webhook/${token}`, (req, res) => {
     }
 });
 
-// Health check endpoint for Render
+// Health check endpoint
 app.get('/health', (req, res) => {
     res.json({ 
         status: 'ok', 
@@ -98,14 +97,13 @@ Hello ${user.first_name || 'Valued Customer'}!
 🏦 *Payment Methods Accepted:*
 ━━━━━━━━━━━━━━━━━━━━━━
 
-📱 *Mobile Money: Telebirr, M-Pesa, CBE Birr*
-🏦 *Banks: CBE, Dashen, Awash, Abyssinia, Hibret, CBO*
+📱 *Mobile Money:* Telebirr, M-Pesa, CBE Birr
+🏦 *Banks:* CBE, Dashen, Awash, Abyssinia, Hibret, CBO
 
 *Type /pay to get started!* 💰
     `;
     
     bot.sendMessage(chatId, welcomeMessage, { parse_mode: 'Markdown' });
-    
     bot.sendMessage(ADMIN_ID, `👤 New user registered: ${user.first_name} @${user.username || 'N/A'} (${user.id})`);
 });
 
@@ -209,6 +207,8 @@ bot.on('callback_query', async (callbackQuery) => {
     const userId = msg.from.id;
     const data = callbackQuery.data;
     
+    console.log(`Callback received: ${data} from user ${userId}`); // Debug log
+    
     if (data === 'cancel_payment') {
         userStates.delete(userId);
         bot.editMessageText('❌ Payment cancelled.', {
@@ -242,9 +242,11 @@ bot.on('callback_query', async (callbackQuery) => {
             reply_markup: {
                 inline_keyboard: [
                     [{ text: '🏦 CBE', callback_data: 'provider_commercial_bank_of_ethiopia' }],
-                    [{ text: '🏦 Dashen', callback_data: 'provider_dashen_bank' }],
-                    [{ text: '🏦 Awash', callback_data: 'provider_awash_bank' }],
-                    [{ text: '🏦 Abyssinia', callback_data: 'provider_abyssinia_bank' }],
+                    [{ text: '🏦 Dashen Bank', callback_data: 'provider_dashen_bank' }],
+                    [{ text: '🏦 Awash Bank', callback_data: 'provider_awash_bank' }],
+                    [{ text: '🏦 Abyssinia Bank', callback_data: 'provider_abyssinia_bank' }],
+                    [{ text: '🏦 Hibret Bank', callback_data: 'provider_hibret_bank' }],
+                    [{ text: '🏦 CBO', callback_data: 'provider_cooperative_bank' }],
                     [{ text: '🔙 Back', callback_data: 'back_to_categories' }]
                 ]
             }
@@ -283,7 +285,9 @@ bot.on('callback_query', async (callbackQuery) => {
                 accountDetails: accountDetails
             });
             
-            bot.editMessageText(`💰 *${accountDetails.name}*\n\nEnter amount in ETB:`, {
+            console.log(`User ${userId} set to awaiting_amount for ${accountDetails.name}`); // Debug log
+            
+            bot.editMessageText(`💰 *${accountDetails.name}*\n\nPlease enter the amount in ETB:\n\nExample: 500 or 1,000`, {
                 chat_id: chatId,
                 message_id: msg.message_id,
                 parse_mode: 'Markdown'
@@ -294,41 +298,89 @@ bot.on('callback_query', async (callbackQuery) => {
     bot.answerCallbackQuery(callbackQuery.id);
 });
 
-// ============= TEXT HANDLING =============
+// ============= MESSAGE HANDLER - THIS IS THE CRITICAL PART =============
 
 bot.on('message', async (msg) => {
     const chatId = msg.chat.id;
     const userId = msg.from.id;
     const text = msg.text;
     
-    if (!text || text.startsWith('/')) return;
+    console.log(`Message received: "${text}" from user ${userId}`); // Debug log
     
+    // Ignore commands (messages starting with /)
+    if (text && text.startsWith('/')) {
+        console.log(`Ignoring command: ${text}`);
+        return;
+    }
+    
+    // Get user state
     const state = userStates.get(userId);
+    console.log(`User state:`, state); // Debug log
     
-    // Handle phone input
-    if (state && state.step === 'awaiting_phone') {
-        const phoneRegex = /^0[79][0-9]{8}$/;
-        if (phoneRegex.test(text)) {
-            db.updateUserPhone(userId, text);
-            userStates.delete(userId);
-            bot.sendMessage(chatId, `✅ Phone updated: ${text}\nUse /pay to make a payment.`);
-        } else {
-            bot.sendMessage(chatId, '❌ Invalid number. Use format: 0912345678');
+    // CASE 1: No active state - user hasn't started a payment
+    if (!state) {
+        if (text && !text.startsWith('/')) {
+            bot.sendMessage(chatId, '❓ *I didn\'t understand that.*\n\nPlease use one of these commands:\n/pay - Make a payment\n/balance - Check balance\n/phone - Update phone\n/help - Get help', {
+                parse_mode: 'Markdown'
+            });
         }
         return;
     }
     
-    // Handle amount input
-    if (state && state.step === 'awaiting_amount') {
-        const amount = parseFloat(text);
+    // CASE 2: Awaiting phone number
+    if (state.step === 'awaiting_phone') {
+        const phoneRegex = /^0[79][0-9]{8}$/;
+        if (phoneRegex.test(text)) {
+            db.updateUserPhone(userId, text);
+            userStates.delete(userId);
+            bot.sendMessage(chatId, `✅ *Phone updated!*\n\nYour phone: ${text}\n\nUse /pay to make a payment.`, {
+                parse_mode: 'Markdown'
+            });
+        } else {
+            bot.sendMessage(chatId, '❌ *Invalid phone number*\n\nPlease use format: 0912345678\n\nExample: 0911223344', {
+                parse_mode: 'Markdown'
+            });
+        }
+        return;
+    }
+    
+    // CASE 3: Awaiting amount - THIS IS WHERE YOUR BOT WAS FAILING
+    if (state.step === 'awaiting_amount') {
+        console.log(`Processing amount input: "${text}"`);
         
-        if (isNaN(amount) || amount < 10) {
-            bot.sendMessage(chatId, '❌ Please enter a valid amount (minimum 10 ETB)');
+        // Clean the amount (remove commas, spaces)
+        const cleanAmount = text.replace(/,/g, '').trim();
+        const amount = parseFloat(cleanAmount);
+        
+        console.log(`Parsed amount: ${amount}`);
+        
+        // Validate amount
+        if (isNaN(amount)) {
+            bot.sendMessage(chatId, '❌ *Invalid amount*\n\nPlease enter a valid number.\n\nExample: 500 or 1000', {
+                parse_mode: 'Markdown'
+            });
             return;
         }
         
-        const payment = db.createPayment(userId, amount, state.provider, state.accountDetails);
+        if (amount < 10) {
+            bot.sendMessage(chatId, '❌ *Amount too low*\n\nMinimum payment is 10 ETB.\n\nPlease enter a higher amount.', {
+                parse_mode: 'Markdown'
+            });
+            return;
+        }
         
+        if (amount > 100000) {
+            bot.sendMessage(chatId, '❌ *Amount too high*\n\nMaximum payment is 100,000 ETB per transaction.\n\nPlease enter a lower amount.', {
+                parse_mode: 'Markdown'
+            });
+            return;
+        }
+        
+        // Create payment record
+        const payment = db.createPayment(userId, amount, state.provider, state.accountDetails);
+        console.log(`Payment created: #${payment.id}`);
+        
+        // Update state to awaiting receipt
         userStates.set(userId, { 
             step: 'awaiting_receipt', 
             paymentId: payment.id,
@@ -337,33 +389,70 @@ bot.on('message', async (msg) => {
             accountDetails: state.accountDetails
         });
         
-        let instrux = `💳 *PAYMENT INSTRUCTIONS*\n\n`;
-        instrux += `Amount: ${amount} ETB\n`;
-        instrux += `Payment ID: #${payment.id}\n\n`;
-        instrux += `Send to:\n`;
-        instrux += `Account: ${state.accountDetails.accountNumber}\n`;
-        instrux += `Name: ${state.accountDetails.accountName}\n`;
-        if (state.accountDetails.branch) instrux += `Branch: ${state.accountDetails.branch}\n`;
-        instrux += `\n✅ Send screenshot of receipt after payment.`;
+        // Build payment instructions
+        let instructions = `💳 *PAYMENT INSTRUCTIONS*\n\n`;
+        instructions += `━━━━━━━━━━━━━━━━━━━━━━\n`;
+        instructions += `📋 *Payment Details:*\n`;
+        instructions += `━━━━━━━━━━━━━━━━━━━━━━\n\n`;
+        instructions += `💰 *Amount:* ${amount.toLocaleString()} ETB\n`;
+        instructions += `🆔 *Payment ID:* #${payment.id}\n`;
+        instructions += `🏦 *Provider:* ${state.provider}\n\n`;
+        instructions += `━━━━━━━━━━━━━━━━━━━━━━\n`;
+        instructions += `📌 *Send payment to:*\n`;
+        instructions += `━━━━━━━━━━━━━━━━━━━━━━\n\n`;
         
-        bot.sendMessage(chatId, instrux, { parse_mode: 'Markdown' });
+        if (state.accountDetails.accountNumber) {
+            instructions += `📱 *Account Number:* ${state.accountDetails.accountNumber}\n`;
+        }
+        if (state.accountDetails.accountName) {
+            instructions += `👤 *Account Name:* ${state.accountDetails.accountName}\n`;
+        }
+        if (state.accountDetails.branch) {
+            instructions += `🏛️ *Branch:* ${state.accountDetails.branch}\n`;
+        }
+        
+        instructions += `\n━━━━━━━━━━━━━━━━━━━━━━\n`;
+        instructions += `✅ *Next Step:*\n`;
+        instructions += `━━━━━━━━━━━━━━━━━━━━━━\n\n`;
+        instructions += `1️⃣ Make the payment to the above account\n`;
+        instructions += `2️⃣ Take a screenshot of the receipt\n`;
+        instructions += `3️⃣ Send the screenshot here\n`;
+        instructions += `4️⃣ Wait for verification (5-30 min)\n\n`;
+        instructions += `⚠️ *Important:* Your payment will only be processed after you send the receipt screenshot.\n\n`;
+        instructions += `*Send your receipt screenshot now:* 📸`;
+        
+        bot.sendMessage(chatId, instructions, { parse_mode: 'Markdown' });
         return;
     }
     
-    // Handle receipt
-    if (state && state.step === 'awaiting_receipt' && msg.photo) {
-        const photo = msg.photo[msg.photo.length - 1];
-        const paymentId = state.paymentId;
-        
-        db.updatePaymentReceipt(paymentId, photo.file_id, msg.caption || '');
-        userStates.delete(userId);
-        
-        bot.sendMessage(chatId, `✅ Receipt #${paymentId} submitted! Pending verification.`);
-        
-        const payment = db.getPayment(paymentId);
-        const user = db.getUser(userId);
-        
-        bot.sendMessage(ADMIN_ID, `🔔 New payment #${payment.id}\nUser: ${user?.firstName}\nAmount: ${payment.amount} ETB\n/approve ${payment.id}`);
+    // CASE 4: Awaiting receipt with photo
+    if (state.step === 'awaiting_receipt') {
+        if (msg.photo) {
+            const photo = msg.photo[msg.photo.length - 1];
+            const paymentId = state.paymentId;
+            
+            console.log(`Receipt received for payment #${paymentId}`);
+            
+            db.updatePaymentReceipt(paymentId, photo.file_id, msg.caption || '');
+            userStates.delete(userId);
+            
+            bot.sendMessage(chatId, `✅ *RECEIPT SUBMITTED!*\n\n━━━━━━━━━━━━━━━━━━━━━━\n📋 Payment #${paymentId}\n💰 Amount: ${state.amount} ETB\n⏳ Status: PENDING VERIFICATION\n━━━━━━━━━━━━━━━━━━━━━━\n\nYou will be notified once the admin verifies your payment.\n\nEstimated time: 5-30 minutes\n\nType /balance to check status anytime.`, {
+                parse_mode: 'Markdown'
+            });
+            
+            // Notify admin
+            const payment = db.getPayment(paymentId);
+            const user = db.getUser(userId);
+            
+            bot.sendMessage(ADMIN_ID, `🔔 *NEW PAYMENT RECEIPT!*\n\n━━━━━━━━━━━━━━━━━━━━━━\n👤 User: ${user?.firstName || userId}\n🆔 Payment ID: #${payment.id}\n💰 Amount: ${payment.amount} ETB\n🏦 Provider: ${payment.provider}\n━━━━━━━━━━━━━━━━━━━━━━\n⚡ /approve ${payment.id} - ✅ Approve\n❌ /reject ${payment.id} [reason]`, {
+                parse_mode: 'Markdown'
+            });
+        } else {
+            bot.sendMessage(chatId, '❌ *Please send a screenshot of your payment receipt.*\n\nTake a photo/screenshot of the transaction confirmation and send it here.', {
+                parse_mode: 'Markdown'
+            });
+        }
+        return;
     }
 });
 
@@ -374,7 +463,9 @@ bot.onText(/^\/(approve|reject|pending|view|stats)(?:\s+(.+))?/, async (msg, mat
     const userId = msg.from.id;
     
     if (userId !== ADMIN_ID) {
-        bot.sendMessage(chatId, '⛔ Unauthorized');
+        bot.sendMessage(chatId, '⛔ *Unauthorized*\n\nYou are not authorized to use admin commands.', {
+            parse_mode: 'Markdown'
+        });
         return;
     }
     
@@ -389,7 +480,6 @@ bot.onText(/^\/(approve|reject|pending|view|stats)(?:\s+(.+))?/, async (msg, mat
 const PORT = process.env.PORT || 3000;
 const RENDER_URL = process.env.RENDER_EXTERNAL_URL || `https://ethiopia-paymnt-bot.onrender.com`;
 
-// Set webhook after server starts
 app.listen(PORT, async () => {
     console.log(`🌐 Server running on port ${PORT}`);
     
