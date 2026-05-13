@@ -22,7 +22,7 @@ const app = express();
 // Parse JSON bodies
 app.use(express.json());
 
-// Keep track of user states
+// Keep track of user states - using Map for persistence
 const userStates = new Map();
 
 // ============= BOT COMMANDS MENU =============
@@ -55,7 +55,8 @@ app.get('/health', (req, res) => {
         status: 'ok', 
         timestamp: new Date().toISOString(),
         uptime: process.uptime(),
-        webhook: 'active'
+        webhook: 'active',
+        activeStates: userStates.size
     });
 });
 
@@ -66,6 +67,8 @@ bot.onText(/\/start/, async (msg) => {
     const chatId = msg.chat.id;
     const user = msg.from;
     
+    console.log(`/start command from user ${user.id}`);
+    
     db.registerUser({
         id: user.id,
         username: user.username || '',
@@ -73,7 +76,8 @@ bot.onText(/\/start/, async (msg) => {
         last_name: user.last_name || ''
     });
     
-    userStates.delete(chatId);
+    // Clear any existing state for this user
+    userStates.delete(user.id);
     
     const welcomeMessage = `
 🎉 *WELCOME TO ETHIOPAY BOT!* 🎉
@@ -112,6 +116,9 @@ bot.onText(/\/pay/, async (msg) => {
     const chatId = msg.chat.id;
     const userId = msg.from.id;
     
+    console.log(`/pay command from user ${userId}`);
+    
+    // Clear any existing state
     userStates.delete(userId);
     
     const keyboard = {
@@ -207,7 +214,10 @@ bot.on('callback_query', async (callbackQuery) => {
     const userId = msg.from.id;
     const data = callbackQuery.data;
     
-    console.log(`Callback received: ${data} from user ${userId}`); // Debug log
+    console.log(`=== CALLBACK RECEIVED ===`);
+    console.log(`User ID: ${userId}`);
+    console.log(`Data: ${data}`);
+    console.log(`Current states in Map:`, Array.from(userStates.keys()));
     
     if (data === 'cancel_payment') {
         userStates.delete(userId);
@@ -279,13 +289,17 @@ bot.on('callback_query', async (callbackQuery) => {
         let accountDetails = accounts.banks[providerKey] || accounts.wallets[providerKey];
         
         if (accountDetails) {
-            userStates.set(userId, { 
+            // CRITICAL: Set the state here
+            const newState = { 
                 step: 'awaiting_amount', 
                 provider: accountDetails.name,
                 accountDetails: accountDetails
-            });
+            };
+            userStates.set(userId, newState);
             
-            console.log(`User ${userId} set to awaiting_amount for ${accountDetails.name}`); // Debug log
+            console.log(`=== STATE SET ===`);
+            console.log(`User ${userId} state set to:`, newState);
+            console.log(`All states:`, Array.from(userStates.entries()));
             
             bot.editMessageText(`💰 *${accountDetails.name}*\n\nPlease enter the amount in ETB:\n\nExample: 500 or 1,000`, {
                 chat_id: chatId,
@@ -298,14 +312,18 @@ bot.on('callback_query', async (callbackQuery) => {
     bot.answerCallbackQuery(callbackQuery.id);
 });
 
-// ============= MESSAGE HANDLER - THIS IS THE CRITICAL PART =============
+// ============= MESSAGE HANDLER =============
 
 bot.on('message', async (msg) => {
     const chatId = msg.chat.id;
     const userId = msg.from.id;
     const text = msg.text;
     
-    console.log(`Message received: "${text}" from user ${userId}`); // Debug log
+    console.log(`=== MESSAGE RECEIVED ===`);
+    console.log(`User ID: ${userId}`);
+    console.log(`Message text: "${text}"`);
+    console.log(`Is photo: ${!!msg.photo}`);
+    console.log(`Current states in Map:`, Array.from(userStates.entries()));
     
     // Ignore commands (messages starting with /)
     if (text && text.startsWith('/')) {
@@ -315,12 +333,13 @@ bot.on('message', async (msg) => {
     
     // Get user state
     const state = userStates.get(userId);
-    console.log(`User state:`, state); // Debug log
+    console.log(`Retrieved state for user ${userId}:`, state);
     
-    // CASE 1: No active state - user hasn't started a payment
+    // CASE 1: No active state
     if (!state) {
+        console.log(`No active state for user ${userId}`);
         if (text && !text.startsWith('/')) {
-            bot.sendMessage(chatId, '❓ *I didn\'t understand that.*\n\nPlease use one of these commands:\n/pay - Make a payment\n/balance - Check balance\n/phone - Update phone\n/help - Get help', {
+            bot.sendMessage(chatId, '❓ *I didn\'t understand that.*\n\nPlease use /pay to start a payment or /help for commands.', {
                 parse_mode: 'Markdown'
             });
         }
@@ -344,11 +363,11 @@ bot.on('message', async (msg) => {
         return;
     }
     
-    // CASE 3: Awaiting amount - THIS IS WHERE YOUR BOT WAS FAILING
+    // CASE 3: Awaiting amount
     if (state.step === 'awaiting_amount') {
-        console.log(`Processing amount input: "${text}"`);
+        console.log(`Processing amount for user ${userId}: "${text}"`);
         
-        // Clean the amount (remove commas, spaces)
+        // Clean the amount
         const cleanAmount = text.replace(/,/g, '').trim();
         const amount = parseFloat(cleanAmount);
         
@@ -381,13 +400,15 @@ bot.on('message', async (msg) => {
         console.log(`Payment created: #${payment.id}`);
         
         // Update state to awaiting receipt
-        userStates.set(userId, { 
+        const receiptState = { 
             step: 'awaiting_receipt', 
             paymentId: payment.id,
             amount: amount,
             provider: state.provider,
             accountDetails: state.accountDetails
-        });
+        };
+        userStates.set(userId, receiptState);
+        console.log(`Updated state for user ${userId}:`, receiptState);
         
         // Build payment instructions
         let instructions = `💳 *PAYMENT INSTRUCTIONS*\n\n`;
@@ -425,8 +446,10 @@ bot.on('message', async (msg) => {
         return;
     }
     
-    // CASE 4: Awaiting receipt with photo
+    // CASE 4: Awaiting receipt
     if (state.step === 'awaiting_receipt') {
+        console.log(`User ${userId} is awaiting receipt. Has photo: ${!!msg.photo}`);
+        
         if (msg.photo) {
             const photo = msg.photo[msg.photo.length - 1];
             const paymentId = state.paymentId;
@@ -435,6 +458,7 @@ bot.on('message', async (msg) => {
             
             db.updatePaymentReceipt(paymentId, photo.file_id, msg.caption || '');
             userStates.delete(userId);
+            console.log(`State cleared for user ${userId}`);
             
             bot.sendMessage(chatId, `✅ *RECEIPT SUBMITTED!*\n\n━━━━━━━━━━━━━━━━━━━━━━\n📋 Payment #${paymentId}\n💰 Amount: ${state.amount} ETB\n⏳ Status: PENDING VERIFICATION\n━━━━━━━━━━━━━━━━━━━━━━\n\nYou will be notified once the admin verifies your payment.\n\nEstimated time: 5-30 minutes\n\nType /balance to check status anytime.`, {
                 parse_mode: 'Markdown'
@@ -454,6 +478,12 @@ bot.on('message', async (msg) => {
         }
         return;
     }
+    
+    // Fallback
+    console.log(`Unhandled state for user ${userId}: ${state.step}`);
+    bot.sendMessage(chatId, '❓ *Something went wrong.*\n\nPlease use /pay to start over.', {
+        parse_mode: 'Markdown'
+    });
 });
 
 // ============= ADMIN COMMANDS =============
@@ -487,6 +517,10 @@ app.listen(PORT, async () => {
     console.log(`🔗 Setting webhook to: ${webhookUrl}`);
     
     try {
+        // Delete any existing webhook first
+        await bot.deleteWebHook();
+        console.log('✅ Deleted existing webhook');
+        
         const result = await bot.setWebHook(webhookUrl);
         if (result) {
             console.log('✅ Webhook set successfully!');
@@ -499,6 +533,7 @@ app.listen(PORT, async () => {
     
     console.log('🤖 Ethiopia Payment Bot is running in WEBHOOK mode');
     console.log(`✅ Admin ID: ${ADMIN_ID}`);
+    console.log(`✅ User states Map is ready`);
 });
 
 // Graceful shutdown
