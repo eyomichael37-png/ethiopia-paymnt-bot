@@ -22,8 +22,8 @@ const app = express();
 // Parse JSON bodies
 app.use(express.json());
 
-// Keep track of user states - using Map for persistence
-const userStates = new Map();
+// Keep track of user states - using simple object for better persistence
+const userSessions = {};
 
 // ============= BOT COMMANDS MENU =============
 const botCommands = [
@@ -56,7 +56,7 @@ app.get('/health', (req, res) => {
         timestamp: new Date().toISOString(),
         uptime: process.uptime(),
         webhook: 'active',
-        activeStates: userStates.size
+        activeSessions: Object.keys(userSessions).length
     });
 });
 
@@ -76,8 +76,8 @@ bot.onText(/\/start/, async (msg) => {
         last_name: user.last_name || ''
     });
     
-    // Clear any existing state for this user
-    userStates.delete(user.id);
+    // Clear any existing session for this user
+    delete userSessions[user.id];
     
     const welcomeMessage = `
 🎉 *WELCOME TO ETHIOPAY BOT!* 🎉
@@ -118,8 +118,8 @@ bot.onText(/\/pay/, async (msg) => {
     
     console.log(`/pay command from user ${userId}`);
     
-    // Clear any existing state
-    userStates.delete(userId);
+    // Clear any existing session
+    delete userSessions[userId];
     
     const keyboard = {
         reply_markup: {
@@ -167,7 +167,7 @@ bot.onText(/\/phone/, (msg) => {
     const chatId = msg.chat.id;
     const userId = msg.from.id;
     
-    userStates.set(userId, { step: 'awaiting_phone' });
+    userSessions[userId] = { step: 'awaiting_phone' };
     bot.sendMessage(chatId, '📱 *Please send your phone number*\nFormat: 0912345678', { parse_mode: 'Markdown' });
 });
 
@@ -202,7 +202,7 @@ bot.onText(/\/cancel/, (msg) => {
     const chatId = msg.chat.id;
     const userId = msg.from.id;
     
-    userStates.delete(userId);
+    delete userSessions[userId];
     bot.sendMessage(chatId, '❌ Operation cancelled. Type /pay to start over.');
 });
 
@@ -214,13 +214,10 @@ bot.on('callback_query', async (callbackQuery) => {
     const userId = msg.from.id;
     const data = callbackQuery.data;
     
-    console.log(`=== CALLBACK RECEIVED ===`);
-    console.log(`User ID: ${userId}`);
-    console.log(`Data: ${data}`);
-    console.log(`Current states in Map:`, Array.from(userStates.keys()));
+    console.log(`Callback: ${data} from user ${userId}`);
     
     if (data === 'cancel_payment') {
-        userStates.delete(userId);
+        delete userSessions[userId];
         bot.editMessageText('❌ Payment cancelled.', {
             chat_id: chatId,
             message_id: msg.message_id
@@ -289,19 +286,19 @@ bot.on('callback_query', async (callbackQuery) => {
         let accountDetails = accounts.banks[providerKey] || accounts.wallets[providerKey];
         
         if (accountDetails) {
-            // CRITICAL: Set the state here
-            const newState = { 
+            // Store session with the provider info
+            userSessions[userId] = { 
                 step: 'awaiting_amount', 
                 provider: accountDetails.name,
+                providerKey: providerKey,
                 accountDetails: accountDetails
             };
-            userStates.set(userId, newState);
             
-            console.log(`=== STATE SET ===`);
-            console.log(`User ${userId} state set to:`, newState);
-            console.log(`All states:`, Array.from(userStates.entries()));
+            console.log(`Session saved for user ${userId}:`, userSessions[userId]);
             
-            bot.editMessageText(`💰 *${accountDetails.name}*\n\nPlease enter the amount in ETB:\n\nExample: 500 or 1,000`, {
+            const amountMessage = `💰 *${accountDetails.name}*\n\nPlease enter the amount in ETB:\n\nExample: 500 or 1,000`;
+            
+            bot.editMessageText(amountMessage, {
                 chat_id: chatId,
                 message_id: msg.message_id,
                 parse_mode: 'Markdown'
@@ -312,33 +309,28 @@ bot.on('callback_query', async (callbackQuery) => {
     bot.answerCallbackQuery(callbackQuery.id);
 });
 
-// ============= MESSAGE HANDLER =============
+// ============= MAIN MESSAGE HANDLER =============
 
 bot.on('message', async (msg) => {
     const chatId = msg.chat.id;
     const userId = msg.from.id;
     const text = msg.text;
     
-    console.log(`=== MESSAGE RECEIVED ===`);
-    console.log(`User ID: ${userId}`);
-    console.log(`Message text: "${text}"`);
-    console.log(`Is photo: ${!!msg.photo}`);
-    console.log(`Current states in Map:`, Array.from(userStates.entries()));
+    console.log(`Message from ${userId}: "${text}" | Has photo: ${!!msg.photo}`);
     
-    // Ignore commands (messages starting with /)
+    // Ignore commands
     if (text && text.startsWith('/')) {
         console.log(`Ignoring command: ${text}`);
         return;
     }
     
-    // Get user state
-    const state = userStates.get(userId);
-    console.log(`Retrieved state for user ${userId}:`, state);
+    // Check if user has an active session
+    const session = userSessions[userId];
+    console.log(`Session for ${userId}:`, session);
     
-    // CASE 1: No active state
-    if (!state) {
-        console.log(`No active state for user ${userId}`);
-        if (text && !text.startsWith('/')) {
+    // NO ACTIVE SESSION
+    if (!session) {
+        if (text) {
             bot.sendMessage(chatId, '❓ *I didn\'t understand that.*\n\nPlease use /pay to start a payment or /help for commands.', {
                 parse_mode: 'Markdown'
             });
@@ -346,12 +338,12 @@ bot.on('message', async (msg) => {
         return;
     }
     
-    // CASE 2: Awaiting phone number
-    if (state.step === 'awaiting_phone') {
+    // AWAITING PHONE NUMBER
+    if (session.step === 'awaiting_phone') {
         const phoneRegex = /^0[79][0-9]{8}$/;
         if (phoneRegex.test(text)) {
             db.updateUserPhone(userId, text);
-            userStates.delete(userId);
+            delete userSessions[userId];
             bot.sendMessage(chatId, `✅ *Phone updated!*\n\nYour phone: ${text}\n\nUse /pay to make a payment.`, {
                 parse_mode: 'Markdown'
             });
@@ -363,17 +355,14 @@ bot.on('message', async (msg) => {
         return;
     }
     
-    // CASE 3: Awaiting amount
-    if (state.step === 'awaiting_amount') {
-        console.log(`Processing amount for user ${userId}: "${text}"`);
+    // AWAITING AMOUNT - THIS IS THE KEY SECTION
+    if (session.step === 'awaiting_amount') {
+        console.log(`Processing amount: "${text}" for user ${userId}`);
         
-        // Clean the amount
+        // Parse the amount
         const cleanAmount = text.replace(/,/g, '').trim();
         const amount = parseFloat(cleanAmount);
         
-        console.log(`Parsed amount: ${amount}`);
-        
-        // Validate amount
         if (isNaN(amount)) {
             bot.sendMessage(chatId, '❌ *Invalid amount*\n\nPlease enter a valid number.\n\nExample: 500 or 1000', {
                 parse_mode: 'Markdown'
@@ -382,54 +371,52 @@ bot.on('message', async (msg) => {
         }
         
         if (amount < 10) {
-            bot.sendMessage(chatId, '❌ *Amount too low*\n\nMinimum payment is 10 ETB.\n\nPlease enter a higher amount.', {
+            bot.sendMessage(chatId, '❌ *Amount too low*\n\nMinimum payment is 10 ETB.', {
                 parse_mode: 'Markdown'
             });
             return;
         }
         
         if (amount > 100000) {
-            bot.sendMessage(chatId, '❌ *Amount too high*\n\nMaximum payment is 100,000 ETB per transaction.\n\nPlease enter a lower amount.', {
+            bot.sendMessage(chatId, '❌ *Amount too high*\n\nMaximum payment is 100,000 ETB.', {
                 parse_mode: 'Markdown'
             });
             return;
         }
         
-        // Create payment record
-        const payment = db.createPayment(userId, amount, state.provider, state.accountDetails);
-        console.log(`Payment created: #${payment.id}`);
+        // Create payment in database
+        const payment = db.createPayment(userId, amount, session.provider, session.accountDetails);
+        console.log(`Payment created: #${payment.id} for ${amount} ETB`);
         
-        // Update state to awaiting receipt
-        const receiptState = { 
-            step: 'awaiting_receipt', 
+        // Update session to awaiting receipt
+        userSessions[userId] = {
+            step: 'awaiting_receipt',
             paymentId: payment.id,
             amount: amount,
-            provider: state.provider,
-            accountDetails: state.accountDetails
+            provider: session.provider,
+            accountDetails: session.accountDetails
         };
-        userStates.set(userId, receiptState);
-        console.log(`Updated state for user ${userId}:`, receiptState);
         
-        // Build payment instructions
+        // Build payment instructions message
         let instructions = `💳 *PAYMENT INSTRUCTIONS*\n\n`;
         instructions += `━━━━━━━━━━━━━━━━━━━━━━\n`;
         instructions += `📋 *Payment Details:*\n`;
         instructions += `━━━━━━━━━━━━━━━━━━━━━━\n\n`;
         instructions += `💰 *Amount:* ${amount.toLocaleString()} ETB\n`;
         instructions += `🆔 *Payment ID:* #${payment.id}\n`;
-        instructions += `🏦 *Provider:* ${state.provider}\n\n`;
+        instructions += `🏦 *Provider:* ${session.provider}\n\n`;
         instructions += `━━━━━━━━━━━━━━━━━━━━━━\n`;
         instructions += `📌 *Send payment to:*\n`;
         instructions += `━━━━━━━━━━━━━━━━━━━━━━\n\n`;
         
-        if (state.accountDetails.accountNumber) {
-            instructions += `📱 *Account Number:* ${state.accountDetails.accountNumber}\n`;
+        if (session.accountDetails.accountNumber) {
+            instructions += `📱 *Account Number:* ${session.accountDetails.accountNumber}\n`;
         }
-        if (state.accountDetails.accountName) {
-            instructions += `👤 *Account Name:* ${state.accountDetails.accountName}\n`;
+        if (session.accountDetails.accountName) {
+            instructions += `👤 *Account Name:* ${session.accountDetails.accountName}\n`;
         }
-        if (state.accountDetails.branch) {
-            instructions += `🏛️ *Branch:* ${state.accountDetails.branch}\n`;
+        if (session.accountDetails.branch) {
+            instructions += `🏛️ *Branch:* ${session.accountDetails.branch}\n`;
         }
         
         instructions += `\n━━━━━━━━━━━━━━━━━━━━━━\n`;
@@ -446,21 +433,20 @@ bot.on('message', async (msg) => {
         return;
     }
     
-    // CASE 4: Awaiting receipt
-    if (state.step === 'awaiting_receipt') {
-        console.log(`User ${userId} is awaiting receipt. Has photo: ${!!msg.photo}`);
-        
+    // AWAITING RECEIPT
+    if (session.step === 'awaiting_receipt') {
         if (msg.photo) {
             const photo = msg.photo[msg.photo.length - 1];
-            const paymentId = state.paymentId;
+            const paymentId = session.paymentId;
             
             console.log(`Receipt received for payment #${paymentId}`);
             
             db.updatePaymentReceipt(paymentId, photo.file_id, msg.caption || '');
-            userStates.delete(userId);
-            console.log(`State cleared for user ${userId}`);
             
-            bot.sendMessage(chatId, `✅ *RECEIPT SUBMITTED!*\n\n━━━━━━━━━━━━━━━━━━━━━━\n📋 Payment #${paymentId}\n💰 Amount: ${state.amount} ETB\n⏳ Status: PENDING VERIFICATION\n━━━━━━━━━━━━━━━━━━━━━━\n\nYou will be notified once the admin verifies your payment.\n\nEstimated time: 5-30 minutes\n\nType /balance to check status anytime.`, {
+            // Clear session
+            delete userSessions[userId];
+            
+            bot.sendMessage(chatId, `✅ *RECEIPT SUBMITTED!*\n\n━━━━━━━━━━━━━━━━━━━━━━\n📋 Payment #${paymentId}\n💰 Amount: ${session.amount} ETB\n⏳ Status: PENDING VERIFICATION\n━━━━━━━━━━━━━━━━━━━━━━\n\nYou will be notified once the admin verifies your payment.\n\nEstimated time: 5-30 minutes\n\nType /balance to check status anytime.`, {
                 parse_mode: 'Markdown'
             });
             
@@ -478,12 +464,6 @@ bot.on('message', async (msg) => {
         }
         return;
     }
-    
-    // Fallback
-    console.log(`Unhandled state for user ${userId}: ${state.step}`);
-    bot.sendMessage(chatId, '❓ *Something went wrong.*\n\nPlease use /pay to start over.', {
-        parse_mode: 'Markdown'
-    });
 });
 
 // ============= ADMIN COMMANDS =============
@@ -493,9 +473,7 @@ bot.onText(/^\/(approve|reject|pending|view|stats)(?:\s+(.+))?/, async (msg, mat
     const userId = msg.from.id;
     
     if (userId !== ADMIN_ID) {
-        bot.sendMessage(chatId, '⛔ *Unauthorized*\n\nYou are not authorized to use admin commands.', {
-            parse_mode: 'Markdown'
-        });
+        bot.sendMessage(chatId, '⛔ *Unauthorized*', { parse_mode: 'Markdown' });
         return;
     }
     
@@ -505,7 +483,7 @@ bot.onText(/^\/(approve|reject|pending|view|stats)(?:\s+(.+))?/, async (msg, mat
     await handleAdminCommand(bot, command, args, chatId, db);
 });
 
-// ============= START SERVER & SET WEBHOOK =============
+// ============= START SERVER =============
 
 const PORT = process.env.PORT || 3000;
 const RENDER_URL = process.env.RENDER_EXTERNAL_URL || `https://ethiopia-paymnt-bot.onrender.com`;
@@ -517,28 +495,13 @@ app.listen(PORT, async () => {
     console.log(`🔗 Setting webhook to: ${webhookUrl}`);
     
     try {
-        // Delete any existing webhook first
         await bot.deleteWebHook();
-        console.log('✅ Deleted existing webhook');
-        
         const result = await bot.setWebHook(webhookUrl);
-        if (result) {
-            console.log('✅ Webhook set successfully!');
-        } else {
-            console.log('❌ Failed to set webhook');
-        }
+        console.log(result ? '✅ Webhook set successfully!' : '❌ Failed to set webhook');
     } catch (error) {
         console.error('❌ Webhook error:', error.message);
     }
     
-    console.log('🤖 Ethiopia Payment Bot is running in WEBHOOK mode');
+    console.log('🤖 Ethiopia Payment Bot is running');
     console.log(`✅ Admin ID: ${ADMIN_ID}`);
-    console.log(`✅ User states Map is ready`);
-});
-
-// Graceful shutdown
-process.on('SIGINT', async () => {
-    console.log('Shutting down...');
-    await bot.deleteWebHook();
-    process.exit(0);
 });
