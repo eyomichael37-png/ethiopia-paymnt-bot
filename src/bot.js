@@ -22,8 +22,40 @@ const app = express();
 // Parse JSON bodies
 app.use(express.json());
 
-// Keep track of user states - using simple object for better persistence
+// Keep track of user sessions
 const userSessions = {};
+
+// ============= PACKAGE DEFINITIONS =============
+const PACKAGES = {
+    package1: {
+        id: 1,
+        name: '📦 BASIC PACKAGE',
+        amount: 1000,
+        price: '1,000 ETB',
+        description: '✨ Perfect for starters'
+    },
+    package2: {
+        id: 2,
+        name: '📦 STANDARD PACKAGE',
+        amount: 2000,
+        price: '2,000 ETB',
+        description: '⭐ Most popular choice'
+    },
+    package3: {
+        id: 3,
+        name: '📦 PREMIUM PACKAGE',
+        amount: 3000,
+        price: '3,000 ETB',
+        description: '💎 Best value'
+    },
+    package4: {
+        id: 4,
+        name: '📦 GOLD PACKAGE',
+        amount: 5000,
+        price: '5,000 ETB',
+        description: '👑 Ultimate experience'
+    }
+};
 
 // ============= BOT COMMANDS MENU =============
 const botCommands = [
@@ -76,7 +108,6 @@ bot.onText(/\/start/, async (msg) => {
         last_name: user.last_name || ''
     });
     
-    // Clear any existing session for this user
     delete userSessions[user.id];
     
     const welcomeMessage = `
@@ -89,20 +120,22 @@ Hello ${user.first_name || 'Valued Customer'}!
 ✅ *You have been successfully registered!*
 
 ━━━━━━━━━━━━━━━━━━━━━━
+📌 *Available Packages:*
+━━━━━━━━━━━━━━━━━━━━━━
+
+📦 *BASIC* - 1,000 ETB
+📦 *STANDARD* - 2,000 ETB  
+📦 *PREMIUM* - 3,000 ETB
+📦 *GOLD* - 5,000 ETB
+
+━━━━━━━━━━━━━━━━━━━━━━
 📌 *Quick Commands:*
 ━━━━━━━━━━━━━━━━━━━━━━
 
-💳 */pay* - Make a payment
+💳 */pay* - Choose a package
 💰 */balance* - Check payment history
 📱 */phone* - Update your phone number
 ❓ */help* - Get detailed instructions
-
-━━━━━━━━━━━━━━━━━━━━━━
-🏦 *Payment Methods Accepted:*
-━━━━━━━━━━━━━━━━━━━━━━
-
-📱 *Mobile Money:* Telebirr, M-Pesa, CBE Birr
-🏦 *Banks:* CBE, Dashen, Awash, Abyssinia, Hibret, CBO
 
 *Type /pay to get started!* 💰
     `;
@@ -111,29 +144,30 @@ Hello ${user.first_name || 'Valued Customer'}!
     bot.sendMessage(ADMIN_ID, `👤 New user registered: ${user.first_name} @${user.username || 'N/A'} (${user.id})`);
 });
 
-// Pay command
+// Pay command - Show packages first
 bot.onText(/\/pay/, async (msg) => {
     const chatId = msg.chat.id;
     const userId = msg.from.id;
     
     console.log(`/pay command from user ${userId}`);
     
-    // Clear any existing session
     delete userSessions[userId];
     
-    const keyboard = {
+    const packageKeyboard = {
         reply_markup: {
             inline_keyboard: [
-                [{ text: '📱 MOBILE MONEY', callback_data: 'cat_mobile' }],
-                [{ text: '🏦 BANK TRANSFER', callback_data: 'cat_bank' }],
+                [{ text: '📦 BASIC - 1,000 ETB', callback_data: 'package_1' }],
+                [{ text: '📦 STANDARD - 2,000 ETB', callback_data: 'package_2' }],
+                [{ text: '📦 PREMIUM - 3,000 ETB', callback_data: 'package_3' }],
+                [{ text: '📦 GOLD - 5,000 ETB', callback_data: 'package_4' }],
                 [{ text: '❌ Cancel', callback_data: 'cancel_payment' }]
             ]
         }
     };
     
-    bot.sendMessage(chatId, '💰 *Select payment method:*', {
+    bot.sendMessage(chatId, '💰 *SELECT YOUR PACKAGE*\n\nChoose a package to continue:', {
         parse_mode: 'Markdown',
-        reply_markup: keyboard.reply_markup
+        reply_markup: packageKeyboard.reply_markup
     });
 });
 
@@ -152,10 +186,11 @@ bot.onText(/\/balance/, async (msg) => {
     if (payments.length === 0) {
         historyMessage += `No payments yet. Use /pay to make a payment!`;
     } else {
-        historyMessage += `*Recent:*\n`;
+        historyMessage += `*Recent Payments:*\n`;
         payments.slice(0, 5).forEach(p => {
             const emoji = p.status === 'approved' ? '✅' : p.status === 'rejected' ? '❌' : '⏳';
-            historyMessage += `${emoji} #${p.id} - ${p.amount} ETB (${p.status})\n`;
+            const packageName = p.packageName || p.provider;
+            historyMessage += `${emoji} ${packageName} - ${p.amount} ETB (${p.status})\n`;
         });
     }
     
@@ -178,20 +213,36 @@ bot.onText(/\/help/, (msg) => {
     const helpMessage = `
 ❓ *HOW TO USE ETHIOPAY BOT*
 
-1️⃣ Type /pay to start
-2️⃣ Choose payment method
-3️⃣ Enter amount
+━━━━━━━━━━━━━━━━━━━━━━
+📌 *STEPS TO PAY:*
+━━━━━━━━━━━━━━━━━━━━━━
+
+1️⃣ Type /pay
+2️⃣ Choose your package (BASIC, STANDARD, PREMIUM, GOLD)
+3️⃣ Select payment method (Mobile Money or Bank)
 4️⃣ Send payment to provided account
 5️⃣ Send screenshot receipt
 6️⃣ Wait for verification (5-30 min)
 
-*Commands:*
+━━━━━━━━━━━━━━━━━━━━━━
+📌 *PACKAGES:*
+━━━━━━━━━━━━━━━━━━━━━━
+
+• BASIC (1,000 ETB) - Perfect for starters
+• STANDARD (2,000 ETB) - Most popular
+• PREMIUM (3,000 ETB) - Best value
+• GOLD (5,000 ETB) - Ultimate experience
+
+━━━━━━━━━━━━━━━━━━━━━━
+📌 *COMMANDS:*
+━━━━━━━━━━━━━━━━━━━━━━
+
 /pay - Make payment
 /balance - Check history
 /phone - Update phone
 /cancel - Cancel operation
 
-*Contact support* for assistance.
+*Type /pay to get started!* 💰
     `;
     
     bot.sendMessage(chatId, helpMessage, { parse_mode: 'Markdown' });
@@ -216,9 +267,10 @@ bot.on('callback_query', async (callbackQuery) => {
     
     console.log(`Callback: ${data} from user ${userId}`);
     
+    // Handle cancel
     if (data === 'cancel_payment') {
         delete userSessions[userId];
-        bot.editMessageText('❌ Payment cancelled.', {
+        bot.editMessageText('❌ Payment cancelled. Type /pay to start over.', {
             chat_id: chatId,
             message_id: msg.message_id
         });
@@ -226,26 +278,116 @@ bot.on('callback_query', async (callbackQuery) => {
         return;
     }
     
-    if (data === 'cat_mobile') {
-        const keyboard = {
+    // Handle package selection
+    if (data.startsWith('package_')) {
+        const packageId = parseInt(data.replace('package_', ''));
+        const selectedPackage = Object.values(PACKAGES).find(p => p.id === packageId);
+        
+        if (selectedPackage) {
+            // Store package in session
+            userSessions[userId] = {
+                step: 'awaiting_payment_method',
+                package: selectedPackage,
+                amount: selectedPackage.amount
+            };
+            
+            console.log(`Package selected for user ${userId}: ${selectedPackage.name} - ${selectedPackage.amount} ETB`);
+            
+            // Show payment method options
+            const paymentMethodKeyboard = {
+                reply_markup: {
+                    inline_keyboard: [
+                        [{ text: '📱 MOBILE MONEY', callback_data: 'payment_cat_mobile' }],
+                        [{ text: '🏦 BANK TRANSFER', callback_data: 'payment_cat_bank' }],
+                        [{ text: '🔙 Back to Packages', callback_data: 'back_to_packages' }],
+                        [{ text: '❌ Cancel', callback_data: 'cancel_payment' }]
+                    ]
+                }
+            };
+            
+            const packageMessage = `
+✅ *Package Selected: ${selectedPackage.name}*
+
+💰 *Amount:* ${selectedPackage.price}
+📝 *Description:* ${selectedPackage.description}
+
+━━━━━━━━━━━━━━━━━━━━━━
+*Now select your payment method:*
+            `;
+            
+            bot.editMessageText(packageMessage, {
+                chat_id: chatId,
+                message_id: msg.message_id,
+                parse_mode: 'Markdown',
+                reply_markup: paymentMethodKeyboard.reply_markup
+            });
+        }
+        bot.answerCallbackQuery(callbackQuery.id);
+        return;
+    }
+    
+    // Handle back to packages
+    if (data === 'back_to_packages') {
+        const packageKeyboard = {
+            reply_markup: {
+                inline_keyboard: [
+                    [{ text: '📦 BASIC - 1,000 ETB', callback_data: 'package_1' }],
+                    [{ text: '📦 STANDARD - 2,000 ETB', callback_data: 'package_2' }],
+                    [{ text: '📦 PREMIUM - 3,000 ETB', callback_data: 'package_3' }],
+                    [{ text: '📦 GOLD - 5,000 ETB', callback_data: 'package_4' }],
+                    [{ text: '❌ Cancel', callback_data: 'cancel_payment' }]
+                ]
+            }
+        };
+        bot.editMessageText('💰 *SELECT YOUR PACKAGE*\n\nChoose a package to continue:', {
+            chat_id: chatId,
+            message_id: msg.message_id,
+            parse_mode: 'Markdown',
+            reply_markup: packageKeyboard.reply_markup
+        });
+        bot.answerCallbackQuery(callbackQuery.id);
+        return;
+    }
+    
+    // Handle payment method - MOBILE MONEY
+    if (data === 'payment_cat_mobile') {
+        const session = userSessions[userId];
+        if (!session || session.step !== 'awaiting_payment_method') {
+            bot.answerCallbackQuery(callbackQuery.id);
+            return;
+        }
+        
+        const mobileKeyboard = {
             reply_markup: {
                 inline_keyboard: [
                     [{ text: '📱 Telebirr', callback_data: 'provider_telebirr' }],
                     [{ text: '📱 M-Pesa', callback_data: 'provider_mpesa' }],
                     [{ text: '📱 CBE Birr', callback_data: 'provider_cbe_birr' }],
-                    [{ text: '🔙 Back', callback_data: 'back_to_categories' }]
+                    [{ text: '🔙 Back to Payment Methods', callback_data: 'back_to_payment_methods' }],
+                    [{ text: '❌ Cancel', callback_data: 'cancel_payment' }]
                 ]
             }
         };
-        bot.editMessageText('📱 *Select Mobile Money:*', {
+        
+        bot.editMessageText('📱 *Select Mobile Money Service:*', {
             chat_id: chatId,
             message_id: msg.message_id,
             parse_mode: 'Markdown',
-            reply_markup: keyboard.reply_markup
+            reply_markup: mobileKeyboard.reply_markup
         });
+        bot.answerCallbackQuery(callbackQuery.id);
+        return;
     }
-    else if (data === 'cat_bank') {
-        const keyboard = {
+    
+    // Handle payment method - BANK TRANSFER
+    if (data === 'payment_cat_bank') {
+        const session = userSessions[userId];
+        if (!session || session.step !== 'awaiting_payment_method') {
+            bot.answerCallbackQuery(callbackQuery.id);
+            return;
+        }
+        
+        const bankKeyboard = {
             reply_markup: {
                 inline_keyboard: [
                     [{ text: '🏦 CBE', callback_data: 'provider_commercial_bank_of_ethiopia' }],
@@ -254,62 +396,128 @@ bot.on('callback_query', async (callbackQuery) => {
                     [{ text: '🏦 Abyssinia Bank', callback_data: 'provider_abyssinia_bank' }],
                     [{ text: '🏦 Hibret Bank', callback_data: 'provider_hibret_bank' }],
                     [{ text: '🏦 CBO', callback_data: 'provider_cooperative_bank' }],
-                    [{ text: '🔙 Back', callback_data: 'back_to_categories' }]
+                    [{ text: '🔙 Back to Payment Methods', callback_data: 'back_to_payment_methods' }],
+                    [{ text: '❌ Cancel', callback_data: 'cancel_payment' }]
                 ]
             }
         };
-        bot.editMessageText('🏦 *Select Bank:*', {
+        
+        bot.editMessageText('🏦 *Select Your Bank:*', {
             chat_id: chatId,
             message_id: msg.message_id,
             parse_mode: 'Markdown',
-            reply_markup: keyboard.reply_markup
+            reply_markup: bankKeyboard.reply_markup
         });
+        bot.answerCallbackQuery(callbackQuery.id);
+        return;
     }
-    else if (data === 'back_to_categories') {
-        const keyboard = {
-            reply_markup: {
-                inline_keyboard: [
-                    [{ text: '📱 MOBILE MONEY', callback_data: 'cat_mobile' }],
-                    [{ text: '🏦 BANK TRANSFER', callback_data: 'cat_bank' }]
-                ]
-            }
-        };
-        bot.editMessageText('💰 *Select payment method:*', {
-            chat_id: chatId,
-            message_id: msg.message_id,
-            parse_mode: 'Markdown',
-            reply_markup: keyboard.reply_markup
-        });
+    
+    // Handle back to payment methods
+    if (data === 'back_to_payment_methods') {
+        const session = userSessions[userId];
+        if (session && session.package) {
+            const paymentMethodKeyboard = {
+                reply_markup: {
+                    inline_keyboard: [
+                        [{ text: '📱 MOBILE MONEY', callback_data: 'payment_cat_mobile' }],
+                        [{ text: '🏦 BANK TRANSFER', callback_data: 'payment_cat_bank' }],
+                        [{ text: '🔙 Back to Packages', callback_data: 'back_to_packages' }],
+                        [{ text: '❌ Cancel', callback_data: 'cancel_payment' }]
+                    ]
+                }
+            };
+            
+            bot.editMessageText(`✅ *Package: ${session.package.name}*\n💰 *Amount: ${session.package.price}*\n\nSelect your payment method:`, {
+                chat_id: chatId,
+                message_id: msg.message_id,
+                parse_mode: 'Markdown',
+                reply_markup: paymentMethodKeyboard.reply_markup
+            });
+        }
+        bot.answerCallbackQuery(callbackQuery.id);
+        return;
     }
-    else if (data.startsWith('provider_')) {
+    
+    // Handle provider selection (Telebirr, M-Pesa, Bank)
+    if (data.startsWith('provider_')) {
+        const session = userSessions[userId];
+        if (!session || !session.package) {
+            bot.answerCallbackQuery(callbackQuery.id);
+            return;
+        }
+        
         const providerKey = data.replace('provider_', '');
         let accountDetails = accounts.banks[providerKey] || accounts.wallets[providerKey];
         
         if (accountDetails) {
-            // Store session with the provider info
-            userSessions[userId] = { 
-                step: 'awaiting_amount', 
+            // Create payment record
+            const payment = db.createPayment(
+                userId, 
+                session.package.amount, 
+                accountDetails.name,
+                accountDetails
+            );
+            
+            console.log(`Payment created: #${payment.id} for ${session.package.amount} ETB`);
+            
+            // Update session
+            userSessions[userId] = {
+                step: 'awaiting_receipt',
+                paymentId: payment.id,
+                amount: session.package.amount,
+                package: session.package,
                 provider: accountDetails.name,
-                providerKey: providerKey,
                 accountDetails: accountDetails
             };
             
-            console.log(`Session saved for user ${userId}:`, userSessions[userId]);
+            // Build payment instructions
+            let instructions = `💳 *PAYMENT INSTRUCTIONS*\n\n`;
+            instructions += `━━━━━━━━━━━━━━━━━━━━━━\n`;
+            instructions += `📋 *Payment Details:*\n`;
+            instructions += `━━━━━━━━━━━━━━━━━━━━━━\n\n`;
+            instructions += `📦 *Package:* ${session.package.name}\n`;
+            instructions += `💰 *Amount:* ${session.package.price}\n`;
+            instructions += `🆔 *Payment ID:* #${payment.id}\n`;
+            instructions += `🏦 *Provider:* ${accountDetails.name}\n\n`;
+            instructions += `━━━━━━━━━━━━━━━━━━━━━━\n`;
+            instructions += `📌 *Send payment to:*\n`;
+            instructions += `━━━━━━━━━━━━━━━━━━━━━━\n\n`;
             
-            const amountMessage = `💰 *${accountDetails.name}*\n\nPlease enter the amount in ETB:\n\nExample: 500 or 1,000`;
+            if (accountDetails.accountNumber) {
+                instructions += `📱 *Account Number:* ${accountDetails.accountNumber}\n`;
+            }
+            if (accountDetails.accountName) {
+                instructions += `👤 *Account Name:* ${accountDetails.accountName}\n`;
+            }
+            if (accountDetails.branch) {
+                instructions += `🏛️ *Branch:* ${accountDetails.branch}\n`;
+            }
+            if (accountDetails.instructions) {
+                instructions += `\n📝 *Instructions:*\n${accountDetails.instructions}\n`;
+            }
             
-            bot.editMessageText(amountMessage, {
+            instructions += `\n━━━━━━━━━━━━━━━━━━━━━━\n`;
+            instructions += `✅ *Next Step:*\n`;
+            instructions += `━━━━━━━━━━━━━━━━━━━━━━\n\n`;
+            instructions += `1️⃣ Make the payment to the above account\n`;
+            instructions += `2️⃣ Take a screenshot of the receipt\n`;
+            instructions += `3️⃣ Send the screenshot here\n`;
+            instructions += `4️⃣ Wait for verification (5-30 min)\n\n`;
+            instructions += `⚠️ *Important:* Your payment will only be processed after you send the receipt screenshot.\n\n`;
+            instructions += `*Send your receipt screenshot now:* 📸`;
+            
+            bot.editMessageText(instructions, {
                 chat_id: chatId,
                 message_id: msg.message_id,
                 parse_mode: 'Markdown'
             });
         }
+        bot.answerCallbackQuery(callbackQuery.id);
+        return;
     }
-    
-    bot.answerCallbackQuery(callbackQuery.id);
 });
 
-// ============= MAIN MESSAGE HANDLER =============
+// ============= MESSAGE HANDLER =============
 
 bot.on('message', async (msg) => {
     const chatId = msg.chat.id;
@@ -324,22 +532,10 @@ bot.on('message', async (msg) => {
         return;
     }
     
-    // Check if user has an active session
     const session = userSessions[userId];
-    console.log(`Session for ${userId}:`, session);
     
-    // NO ACTIVE SESSION
-    if (!session) {
-        if (text) {
-            bot.sendMessage(chatId, '❓ *I didn\'t understand that.*\n\nPlease use /pay to start a payment or /help for commands.', {
-                parse_mode: 'Markdown'
-            });
-        }
-        return;
-    }
-    
-    // AWAITING PHONE NUMBER
-    if (session.step === 'awaiting_phone') {
+    // Handle phone number update
+    if (session && session.step === 'awaiting_phone') {
         const phoneRegex = /^0[79][0-9]{8}$/;
         if (phoneRegex.test(text)) {
             db.updateUserPhone(userId, text);
@@ -348,121 +544,44 @@ bot.on('message', async (msg) => {
                 parse_mode: 'Markdown'
             });
         } else {
-            bot.sendMessage(chatId, '❌ *Invalid phone number*\n\nPlease use format: 0912345678\n\nExample: 0911223344', {
+            bot.sendMessage(chatId, '❌ *Invalid phone number*\n\nPlease use format: 0912345678', {
                 parse_mode: 'Markdown'
             });
         }
         return;
     }
     
-    // AWAITING AMOUNT - THIS IS THE KEY SECTION
-    if (session.step === 'awaiting_amount') {
-        console.log(`Processing amount: "${text}" for user ${userId}`);
+    // Handle receipt upload
+    if (session && session.step === 'awaiting_receipt' && msg.photo) {
+        const photo = msg.photo[msg.photo.length - 1];
+        const paymentId = session.paymentId;
         
-        // Parse the amount
-        const cleanAmount = text.replace(/,/g, '').trim();
-        const amount = parseFloat(cleanAmount);
+        console.log(`Receipt received for payment #${paymentId}`);
         
-        if (isNaN(amount)) {
-            bot.sendMessage(chatId, '❌ *Invalid amount*\n\nPlease enter a valid number.\n\nExample: 500 or 1000', {
-                parse_mode: 'Markdown'
-            });
-            return;
-        }
+        db.updatePaymentReceipt(paymentId, photo.file_id, msg.caption || '');
         
-        if (amount < 10) {
-            bot.sendMessage(chatId, '❌ *Amount too low*\n\nMinimum payment is 10 ETB.', {
-                parse_mode: 'Markdown'
-            });
-            return;
-        }
+        // Clear session
+        delete userSessions[userId];
         
-        if (amount > 100000) {
-            bot.sendMessage(chatId, '❌ *Amount too high*\n\nMaximum payment is 100,000 ETB.', {
-                parse_mode: 'Markdown'
-            });
-            return;
-        }
+        bot.sendMessage(chatId, `✅ *RECEIPT SUBMITTED!*\n\n━━━━━━━━━━━━━━━━━━━━━━\n📋 Payment #${paymentId}\n📦 ${session.package.name}\n💰 ${session.package.price}\n⏳ Status: PENDING VERIFICATION\n━━━━━━━━━━━━━━━━━━━━━━\n\nYou will be notified once verified.\n\nType /balance to check status.`, {
+            parse_mode: 'Markdown'
+        });
         
-        // Create payment in database
-        const payment = db.createPayment(userId, amount, session.provider, session.accountDetails);
-        console.log(`Payment created: #${payment.id} for ${amount} ETB`);
+        // Notify admin
+        const payment = db.getPayment(paymentId);
+        const user = db.getUser(userId);
         
-        // Update session to awaiting receipt
-        userSessions[userId] = {
-            step: 'awaiting_receipt',
-            paymentId: payment.id,
-            amount: amount,
-            provider: session.provider,
-            accountDetails: session.accountDetails
-        };
-        
-        // Build payment instructions message
-        let instructions = `💳 *PAYMENT INSTRUCTIONS*\n\n`;
-        instructions += `━━━━━━━━━━━━━━━━━━━━━━\n`;
-        instructions += `📋 *Payment Details:*\n`;
-        instructions += `━━━━━━━━━━━━━━━━━━━━━━\n\n`;
-        instructions += `💰 *Amount:* ${amount.toLocaleString()} ETB\n`;
-        instructions += `🆔 *Payment ID:* #${payment.id}\n`;
-        instructions += `🏦 *Provider:* ${session.provider}\n\n`;
-        instructions += `━━━━━━━━━━━━━━━━━━━━━━\n`;
-        instructions += `📌 *Send payment to:*\n`;
-        instructions += `━━━━━━━━━━━━━━━━━━━━━━\n\n`;
-        
-        if (session.accountDetails.accountNumber) {
-            instructions += `📱 *Account Number:* ${session.accountDetails.accountNumber}\n`;
-        }
-        if (session.accountDetails.accountName) {
-            instructions += `👤 *Account Name:* ${session.accountDetails.accountName}\n`;
-        }
-        if (session.accountDetails.branch) {
-            instructions += `🏛️ *Branch:* ${session.accountDetails.branch}\n`;
-        }
-        
-        instructions += `\n━━━━━━━━━━━━━━━━━━━━━━\n`;
-        instructions += `✅ *Next Step:*\n`;
-        instructions += `━━━━━━━━━━━━━━━━━━━━━━\n\n`;
-        instructions += `1️⃣ Make the payment to the above account\n`;
-        instructions += `2️⃣ Take a screenshot of the receipt\n`;
-        instructions += `3️⃣ Send the screenshot here\n`;
-        instructions += `4️⃣ Wait for verification (5-30 min)\n\n`;
-        instructions += `⚠️ *Important:* Your payment will only be processed after you send the receipt screenshot.\n\n`;
-        instructions += `*Send your receipt screenshot now:* 📸`;
-        
-        bot.sendMessage(chatId, instructions, { parse_mode: 'Markdown' });
+        bot.sendMessage(ADMIN_ID, `🔔 *NEW PAYMENT RECEIPT!*\n\n━━━━━━━━━━━━━━━━━━━━━━\n👤 User: ${user?.firstName || userId}\n📦 Package: ${session.package.name}\n💰 Amount: ${session.package.price}\n🆔 Payment ID: #${payment.id}\n🏦 Provider: ${session.provider}\n━━━━━━━━━━━━━━━━━━━━━━\n⚡ /approve ${payment.id} - ✅ Approve\n❌ /reject ${payment.id} [reason]`, {
+            parse_mode: 'Markdown'
+        });
         return;
     }
     
-    // AWAITING RECEIPT
-    if (session.step === 'awaiting_receipt') {
-        if (msg.photo) {
-            const photo = msg.photo[msg.photo.length - 1];
-            const paymentId = session.paymentId;
-            
-            console.log(`Receipt received for payment #${paymentId}`);
-            
-            db.updatePaymentReceipt(paymentId, photo.file_id, msg.caption || '');
-            
-            // Clear session
-            delete userSessions[userId];
-            
-            bot.sendMessage(chatId, `✅ *RECEIPT SUBMITTED!*\n\n━━━━━━━━━━━━━━━━━━━━━━\n📋 Payment #${paymentId}\n💰 Amount: ${session.amount} ETB\n⏳ Status: PENDING VERIFICATION\n━━━━━━━━━━━━━━━━━━━━━━\n\nYou will be notified once the admin verifies your payment.\n\nEstimated time: 5-30 minutes\n\nType /balance to check status anytime.`, {
-                parse_mode: 'Markdown'
-            });
-            
-            // Notify admin
-            const payment = db.getPayment(paymentId);
-            const user = db.getUser(userId);
-            
-            bot.sendMessage(ADMIN_ID, `🔔 *NEW PAYMENT RECEIPT!*\n\n━━━━━━━━━━━━━━━━━━━━━━\n👤 User: ${user?.firstName || userId}\n🆔 Payment ID: #${payment.id}\n💰 Amount: ${payment.amount} ETB\n🏦 Provider: ${payment.provider}\n━━━━━━━━━━━━━━━━━━━━━━\n⚡ /approve ${payment.id} - ✅ Approve\n❌ /reject ${payment.id} [reason]`, {
-                parse_mode: 'Markdown'
-            });
-        } else {
-            bot.sendMessage(chatId, '❌ *Please send a screenshot of your payment receipt.*\n\nTake a photo/screenshot of the transaction confirmation and send it here.', {
-                parse_mode: 'Markdown'
-            });
-        }
-        return;
+    // No active session or invalid input
+    if (text && !text.startsWith('/')) {
+        bot.sendMessage(chatId, '❓ *I didn\'t understand that.*\n\nPlease use /pay to choose a package and make a payment.', {
+            parse_mode: 'Markdown'
+        });
     }
 });
 
@@ -502,6 +621,7 @@ app.listen(PORT, async () => {
         console.error('❌ Webhook error:', error.message);
     }
     
-    console.log('🤖 Ethiopia Payment Bot is running');
+    console.log('🤖 Ethiopia Payment Bot is running with PACKAGE system');
     console.log(`✅ Admin ID: ${ADMIN_ID}`);
+    console.log(`📦 Available packages: BASIC(1000), STANDARD(2000), PREMIUM(3000), GOLD(5000)`);
 });
